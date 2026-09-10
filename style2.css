@@ -4,7 +4,7 @@
     color: aliceblue;
 }
 body{
-    background: url("background.png");
+    background: url("assets/background.png");
     display: flex;
     justify-content: center;
     align-items: center;
