@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voxel World</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #87CEEB; font-family: sans-serif; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(0,0,0,0.5); border-radius: 50%;
+    pointer-events: none; z-index: 10;
+  }
+  #hud {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; z-index: 10;
+  }
+  .slot {
+    width: 48px; height: 48px; background: rgba(0,0,0,0.4);
+    border: 2px solid rgba(255,255,255,0.6); border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  .slot.active { border-color: #fff; box-shadow: 0 0 8px #fff; }
+  .swatch { width: 32px; height: 32px; border-radius: 2px; }
+  #info {
+    position: fixed; top: 10px; left: 10px; color: #fff;
+    text-shadow: 0 0 4px #000; font-size: 13px; z-index: 10;
+    background: rgba(0,0,0,0.35); padding: 8px 12px; border-radius: 6px;
+    max-width: 260px; line-height: 1.5;
+  }
+  #blocker {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 22px; cursor: pointer; z-index: 20; text-align:center;
+  }
+  #blocker span { font-size: 14px; display:block; margin-top: 10px; opacity: .8; }
+</style>
+</head>
+<body>
+<div id="crosshair"></div>
+<div id="info">
+  <b>WASD</b> — move &nbsp; <b>SPACE</b> — jump<br>
+  <b>Left click</b> — break block &nbsp; <b>Right click</b> — place block<br>
+  <b>1-6</b> or click slot — choose block type
+</div>
+<div id="hud"></div>
+<div id="blocker">Click to play<span>(Esc to release mouse)</span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- SETUP ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87CEEB);
+scene.fog = new THREE.Fog(0x87CEEB, 40, 110);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(50, 80, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+scene.add(sun);
+
+// ---------- BLOCK TYPES ----------
+const BLOCK_TYPES = [
+  { name: "Grass", color: 0x5aa93a, top: 0x6bc94a },
+  { name: "Dirt",  color: 0x8a5a34 },
+  { name: "Stone", color: 0x8a8a8a },
+  { name: "Sand",  color: 0xe0d18a },
+  { name: "Wood",  color: 0x7a5230 },
+  { name: "Leaves",color: 0x2f7d32 },
+];
+let currentType = 0;
+
+const hud = document.getElementById('hud');
+BLOCK_TYPES.forEach((b, i) => {
+  const slot = document.createElement('div');
+  slot.className = 'slot' + (i===0 ? ' active':'');
+  const sw = document.createElement('div');
+  sw.className = 'swatch';
+  sw.style.background = '#' + b.color.toString(16).padStart(6,'0');
+  slot.appendChild(sw);
+  slot.onclick = () => selectSlot(i);
+  hud.appendChild(slot);
+});
+function selectSlot(i){
+  currentType = i;
+  [...hud.children].forEach((s,idx)=> s.classList.toggle('active', idx===i));
+}
+document.addEventListener('keydown', e=>{
+  const n = parseInt(e.key);
+  if(n>=1 && n<=BLOCK_TYPES.length) selectSlot(n-1);
+});
+
+// ---------- WORLD ----------
+const CUBE = 1;
+const geometry = new THREE.BoxGeometry(CUBE, CUBE, CUBE);
+const blocks = new Map(); // key "x,y,z" -> mesh
+const key = (x,y,z)=>`${x},${y},${z}`;
+
+function materialFor(typeIdx, isTop){
+  const t = BLOCK_TYPES[typeIdx];
+  const color = (isTop && t.top) ? t.top : t.color;
+  return new THREE.MeshLambertMaterial({ color });
+}
+
+function addBlock(x,y,z,typeIdx,persist=true){
+  const k = key(x,y,z);
+  if(blocks.has(k)) return;
+  const mesh = new THREE.Mesh(geometry, materialFor(typeIdx, y>=0));
+  mesh.position.set(x+0.5,y+0.5,z+0.5);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData.type = typeIdx;
+  scene.add(mesh);
+  blocks.set(k, mesh);
+}
+
+function removeBlock(x,y,z){
+  const k = key(x,y,z);
+  const mesh = blocks.get(k);
+  if(mesh){ scene.remove(mesh); blocks.delete(k); }
+}
+
+// simple terrain: rolling hills via layered sine noise
+function heightAt(x,z){
+  return Math.floor(
+    2*Math.sin(x*0.15) + 2*Math.cos(z*0.15) +
+    1.2*Math.sin((x+z)*0.08) + 4
+  );
+}
+
+const SIZE = 40;
+for(let x=-SIZE; x<SIZE; x++){
+  for(let z=-SIZE; z<SIZE; z++){
+    const h = heightAt(x,z);
+    for(let y=0; y<=h; y++){
+      let type = 2; // stone
+      if(y===h) type = 0; // grass top
+      else if(y>=h-2) type = 1; // dirt
+      addBlock(x,y,z,type);
+    }
+  }
+}
+
+// a few trees
+for(let i=0;i<25;i++){
+  const x = Math.floor((Math.random()-0.5)*SIZE*1.6);
+  const z = Math.floor((Math.random()-0.5)*SIZE*1.6);
+  const h = heightAt(x,z);
+  const trunkH = 3 + Math.floor(Math.random()*2);
+  for(let y=h+1;y<=h+trunkH;y++) addBlock(x,y,z,4);
+  for(let dx=-1;dx<=1;dx++)
+    for(let dz=-1;dz<=1;dz++)
+      for(let dy=0; dy<=1; dy++)
+        addBlock(x+dx,h+trunkH+dy,z+dz,5);
+  addBlock(x,h+trunkH+2,z,5);
+}
+
+// ---------- PLAYER / CONTROLS ----------
+const player = {
+  pos: new THREE.Vector3(0, heightAt(0,0)+3, 0),
+  vel: new THREE.Vector3(),
+  yaw: 0, pitch: 0,
+  onGround: false,
+};
+camera.position.copy(player.pos);
+
+const keysDown = {};
+document.addEventListener('keydown', e=>keysDown[e.code]=true);
+document.addEventListener('keyup', e=>keysDown[e.code]=false);
+
+const blocker = document.getElementById('blocker');
+blocker.addEventListener('click', ()=> renderer.domElement.requestPointerLock());
+document.addEventListener('pointerlockchange', ()=>{
+  blocker.style.display = (document.pointerLockElement === renderer.domElement) ? 'none' : 'flex';
+});
+document.addEventListener('mousemove', e=>{
+  if(document.pointerLockElement !== renderer.domElement) return;
+  const sens = 0.0022;
+  player.yaw -= e.movementX * sens;
+  player.pitch -= e.movementY * sens;
+  player.pitch = Math.max(-Math.PI/2+0.05, Math.min(Math.PI/2-0.05, player.pitch));
+});
+
+// block collision helpers
+function solidAt(x,y,z){
+  return blocks.has(key(Math.floor(x), Math.floor(y), Math.floor(z)));
+}
+
+const GRAVITY = -22;
+const SPEED = 6;
+const JUMP_V = 8.5;
+
+function updatePlayer(dt){
+  const forward = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw)).multiplyScalar(-1);
+  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+
+  let move = new THREE.Vector3();
+  if(keysDown['KeyW']) move.add(forward);
+  if(keysDown['KeyS']) move.sub(forward);
+  if(keysDown['KeyD']) move.add(right);
+  if(keysDown['KeyA']) move.sub(right);
+  if(move.lengthSq()>0) move.normalize().multiplyScalar(SPEED);
+
+  player.vel.x = move.x;
+  player.vel.z = move.z;
+  player.vel.y += GRAVITY * dt;
+
+  if(keysDown['Space'] && player.onGround){
+    player.vel.y = JUMP_V;
+    player.onGround = false;
+  }
+
+  // move + collide per axis
+  const p = player.pos;
+  const r = 0.3, h = 1.7, eyeOffset = 1.6;
+
+  // X
+  p.x += player.vel.x * dt;
+  if(collides(p, r, h)) p.x -= player.vel.x * dt;
+  // Z
+  p.z += player.vel.z * dt;
+  if(collides(p, r, h)) p.z -= player.vel.z * dt;
+  // Y
+  p.y += player.vel.y * dt;
+  if(collides(p, r, h)){
+    if(player.vel.y < 0) player.onGround = true;
+    p.y -= player.vel.y * dt;
+    player.vel.y = 0;
+  } else {
+    player.onGround = false;
+  }
+
+  camera.position.set(p.x, p.y + eyeOffset, p.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+}
+
+function collides(p, r, h){
+  const minY = Math.floor(p.y - h*0.9);
+  const maxY = Math.floor(p.y);
+  for(let y=minY; y<=maxY; y++){
+    for(const dx of [-r, r]){
+      for(const dz of [-r, r]){
+        if(solidAt(p.x+dx, y, p.z+dz)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ---------- RAYCAST BREAK/PLACE ----------
+const raycaster = new THREE.Raycaster();
+raycaster.far = 7;
+renderer.domElement.addEventListener('mousedown', e=>{
+  if(document.pointerLockElement !== renderer.domElement) return;
+  raycaster.setFromCamera({x:0,y:0}, camera);
+  const hits = raycaster.intersectObjects([...blocks.values()]);
+  if(hits.length === 0) return;
+  const hit = hits[0];
+
+  if(e.button === 0){ // left click: break
+    const m = hit.object;
+    const p = m.position;
+    removeBlock(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z));
+  } else if(e.button === 2){ // right click: place
+    const n = hit.face.normal;
+    const p = hit.object.position.clone().add(n);
+    const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z);
+    // avoid placing inside the player
+    const px = player.pos, dist = Math.hypot(px.x-(x+0.5), px.z-(z+0.5));
+    if(!(dist < 0.6 && y >= Math.floor(px.y-1) && y <= Math.floor(px.y+1.7))){
+      addBlock(x,y,z,currentType);
+    }
+  }
+});
+renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
+
+// ---------- LOOP ----------
+let last = performance.now();
+function animate(now){
+  const dt = Math.min(0.05, (now-last)/1000);
+  last = now;
+  updatePlayer(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

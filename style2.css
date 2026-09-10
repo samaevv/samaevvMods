@@ -1,0 +1,79 @@
+.Name{
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-weight: 900;
+    color: aliceblue;
+}
+body{
+    background: url("background.png");
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+.img{
+    border-radius: 10px;
+}
+.btn{
+    
+    width: 200px;
+    height: 50px;
+    border-radius: 10px;
+    border: none;
+    background-color: rgb(102, 192, 244);
+    font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
+    font-size: larger;
+    transition: all 0.2s;
+    position: absolute;
+    cursor: pointer;
+    display: block;
+}
+
+.div1{
+    width: 900px;
+    height: 650px;
+    display: flex;
+    background-color: rgba(240, 248, 255, 0);
+    flex-direction: column;
+    border-radius: 10px;
+}
+.text{
+    border-radius: 0px 0px 10px 0px;
+    display: flex;
+    /* justify-content: flex-end; */
+    flex: 1;
+    flex-direction: column;
+    /* gap: 40px; */
+}
+.down{
+    background-color: rgba(22, 46, 184, 0.313);
+    flex: 1;
+    display: flex;
+    border-radius: 10px;
+}
+.description{
+    flex: 1;
+    background: rgba(45, 45, 164, 0);
+    color:white;
+    font-size: 10px;
+    box-sizing: border-box;
+    padding: 20px;
+    
+}
+.down{
+    flex: 1;
+    display: flex;
+}
+.DownloadBtn{
+    background: rgba(44, 50, 154, 0.452);
+    height: 65px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0px 0px 10px 0px;
+    
+}
+.up{
+    background: rgba(43, 75, 189, 0.435);
+    border-radius: 10px 10px 0px 0px;
+    color: white;
+}
